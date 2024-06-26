@@ -1,0 +1,193 @@
+________________________________________________________________________________________________________
+ARDUINO CODE:
+_________________________________________________________________________________________________________
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Set the LCD address to 0x27 for a 16 chars and 2 line display
+
+void setup() {
+  Serial.begin(9600); // Initialize serial communication
+  lcd.init();        // Initialize the LCD
+  lcd.backlight();   // Turn on the backlight (if available)
+  lcd.setCursor(0, 0);
+  lcd.print("V:");
+  lcd.setCursor(6, 0);
+  lcd.print("I:");
+  lcd.setCursor(2, 1);
+  lcd.print("POW:");
+}
+
+void loop() {
+  int sensorValueV = analogRead(A0); // Read voltage sensor value
+  double voltage = map(sensorValueV, 0, 1024, 0, 2500);
+  voltage /= 100;
+  
+  float current, Samples = 0.0, A = 0.0, Value = 0.0;
+
+  for (int x = 0; x < 150; x++) { // Get 150 samples
+    current = analogRead(A1);       // Read current sensor values   
+    Samples = Samples + current;    // Add samples together
+    delay(3);                       // Let ADC settle before next sample (3ms)
+  }
+  
+  A = Samples / 150.0;
+  Value = abs((2.5 - (A * (5.0 / 1024.0))) / 0.185);
+   if (voltage > 6.06) {
+    voltage = 6.06;
+  }
+
+  if (abs(Value) > 0.52) {
+    Value = 0.52; // Ensure current remains within -0.52 to 0.52
+  }
+  float power = Value * voltage;
+
+  Serial.print("current:");
+  Serial.println(abs(Value));
+  Serial.print("voltage:");
+  Serial.println(voltage);
+  Serial.print("POWER:");
+  Serial.println(power);
+
+  // Send data over Serial to ESP32
+  Serial.print(voltage); // Send voltage
+  Serial.print(',');     // Delimiter
+  Serial.print(Value);   // Send current
+  Serial.print(',');     // Delimiter
+  Serial.println(power); // Send power
+
+  lcd.setCursor(3, 0);
+  lcd.print(voltage);  
+
+  lcd.setCursor(9, 0);
+  lcd.print(Value);
+
+  lcd.setCursor(7, 1);
+  lcd.print(power);
+
+  delay(1000);  // Adjust delay as needed
+}
+
+_____________________________________________________________________________________
+WIFI CODE:
+_____________________________________________________________________________________
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <HardwareSerial.h>
+
+const char* ssid = "Wifi ssid";      // Change to your WiFi network SSID
+const char* password = "password";  // Change to your WiFi network password
+
+WebServer server(80); // Create a web server object listening on port 80
+
+float voltage = 0;
+float current = 0;
+float power = 0;
+
+void setup() {
+  Serial.begin(9600);  // Initialize serial communication
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);  // Initialize Serial2 (RX2 = GPIO16, TX2 = GPIO17)
+
+  // Connect to WiFi network
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");\
+  \
+  \
+
+
+  // Route handlers for web server
+  server.on("/", handleRoot);
+
+  // Start web server
+  server.begin();
+
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient(); // Handle client requests
+
+  if (Serial2.available()) {
+    // Read incoming data from Arduino Uno
+    String data = Serial2.readStringUntil('\n');
+
+    // Parse data
+    int comma1 = data.indexOf(',');
+    int comma2 = data.indexOf(',', comma1 + 1);
+
+    if (comma1 != -1 && comma2 != -1) {
+      voltage = data.substring(0, comma1).toFloat();
+      current = data.substring(comma1 + 1, comma2).toFloat();
+      power = data.substring(comma2 + 1).toFloat();
+
+      // Display received data on Serial Monitor
+      Serial.print("Voltage: ");
+      Serial.println(voltage);
+      Serial.print("Current: ");
+      Serial.println(current);
+      Serial.print("Power: ");
+      Serial.println(power);
+    }
+  }
+
+  delay(100); // Add a small delay to avoid flooding
+}
+
+// Handle root page request
+void handleRoot() {
+  String webpage = "<!DOCTYPE html>";
+  webpage += "<html lang=\"en\">";
+  webpage += "<head>";
+  webpage += "<meta charset=\"UTF-8\">";
+  webpage += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">";
+  webpage += "<title>ESP32 Data</title>";
+  webpage += "<style>";
+  webpage += "body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }";
+  webpage += "header { background-color: #4CAF50; color: white; text-align: center; padding: 1em 0; }";
+  webpage += "h1 { margin: 0; }";
+  webpage += "main { padding: 20px; }";
+  webpage += "p { font-size: 1.2em; }";
+  webpage += ".data { background-color: white; padding: 20px; margin: 20px auto; border-radius: 10px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); max-width: 600px; text-align: center; }";
+  webpage += ".max-data { margin-top: 20px; font-size: 1em; }";
+  webpage += "footer { text-align: center; padding: 1em 0; background-color: #f1f1f1; }";
+  webpage += "footer p { margin: 5px 0; }";
+  webpage += ".refresh-button { margin-top: 20px; padding: 10px 20px; font-size: 1em; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }";
+  webpage += ".refresh-button:hover { background-color: #45a049; }";
+  webpage += "</style>";
+  webpage += "<script>";
+  webpage += "function refreshPage() { location.reload(); }";
+  webpage += "</script>";
+  webpage += "</head>";
+  webpage += "<body>";
+  webpage += "<header>";
+  webpage += "<h1>Solar Monitoring System</h1>";
+  webpage += "</header>";
+  webpage += "<main>";
+  webpage += "<div class=\"data\">";
+  webpage += "<p><strong>Voltage:</strong> " + String(voltage) + " V</p>";
+  webpage += "<p><strong>Current:</strong> " + String(current) + " A</p>";
+  webpage += "<p><strong>Power:</strong> " + String(power) + " W</p>";
+  webpage += "<button class=\"refresh-button\" onclick=\"refreshPage()\">Refresh</button>";
+  webpage += "<div class=\"max-data\">";
+  webpage += "<p><strong>Max Voltage:</strong> 6.06 V</p>";
+  webpage += "<p><strong>Max Current:</strong> 0.52 A</p>";
+  webpage += "<p><strong>Max Power:</strong> 3.15 W</p>";
+  webpage += "</div>";
+  webpage += "</div>";
+  webpage += "</main>";
+  webpage += "<footer>";
+  webpage += "<h2>Done By:</h2>";
+  webpage += "<p>ARULSELVAN(7276722BEE104)</p>";
+  webpage += "<p>SASIDHARAN(7276722BEE020)</p>";
+  webpage += "<p>SAKTHI SRI(7276722BEE100)</p>";
+  webpage += "</footer>";
+  webpage += "</body>";
+  webpage += "</html>";
+
+  server.send(200, "text/html", webpage); // Send HTML response
+}
